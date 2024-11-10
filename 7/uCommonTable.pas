@@ -1,16 +1,18 @@
 unit uCommonTable;
 {//----------------------------------------------------------------------------+
-    Базовый класс таблицы реализует черезстрочную подсветку и только основные функции. все осальное в наследниках
+    Extended Common Table class Based on Base Table. Can Sort and Search
 }//----------------------------------------------------------------------------+
 interface
 //-----------------------------------------------------------------------------+
 uses Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-     Dialogs, StdCtrls, Buttons, ExtCtrls, Grids, uNixTime, uLogger, uBaseTable;
+     Dialogs, StdCtrls, Buttons, ExtCtrls, Grids, uNixTime, uLogger;
 //-----------------------------------------------------------------------------+
 type PStringGrid = ^TStringGrid;
 //-----------------------------------------------------------------------------+
 type TTabAllign = (taLeft,taRight,taCenter);
 type TTabColTypes = (tcLabel,tcObject,tcStr,tcInt,tcUint,tcDbl,tcIpAddr,tcDate,tcTime,tcDateTime);
+//-----------------------------------------------------------------------------+
+type TCellPos = record Col,Row:Word;end;
 //-----------------------------------------------------------------------------+
 type TRHeader = record
     width   : Word;
@@ -36,8 +38,6 @@ type TCCommonTable = class
         FLSearchDir : Integer;
         FLSearchPos : Integer;
         FLSelColl   : Integer;
-        //---
-        FSelectable : Boolean;
         FScrollStyle: TScrollStyle;
         //---
         FClick      : TTableMouseEvent;
@@ -47,7 +47,8 @@ type TCCommonTable = class
         procedure   SetSortable(sort:Boolean);
         function    IsCollumnSortable(AColl:Integer):Boolean;
         procedure   SetScroll(ScrollStyle:TScrollStyle);
-        procedure   SetSelectable(SetSelectable:Boolean);
+        function    FGetSelRow:Word;
+        function    FGetSelCell:TCellPos;
         //---
         procedure   DrawArrow(up_dn:Integer; Rect:TRect; ARight:Boolean=False);
         procedure   DrawCell(ACol, ARow: Integer; Rect: TRect);
@@ -95,19 +96,23 @@ type TCCommonTable = class
     public
         constructor Create(Grid:PStringGrid; ColCount:Word=2; RowCount:Word=5; RowHeight:Word=22);
         procedure   AutoWidth;
-        procedure   AddColHeader(Name:ShortString;ColType:TTabColTypes;Align:TTabAllign=taLeft;Width:Word=0);
+        procedure   SetColHeader(Name:ShortString;ColType:TTabColTypes;Align:TTabAllign=taLeft;Width:Word=0);
         procedure   RowAdd(DelimitedText:string;Delimiter:AnsiChar=',');
-        procedure   RowInsert(ARow:Word;DelimitedText:string;Delimiter:AnsiChar=',');
-        procedure   GetSelectedRow(var Row:Integer; var List:TStrings);
-        procedure   GetSelectedCell(var ACol, ARow:Integer; var Text:string);
+        procedure   RowInsert(Row:Word;DelimitedText:string;Delimiter:AnsiChar=',');
+        function    Row(Row:Word):TStrings;
+        procedure   CellInsert(Col:Byte; Row:Word; Val:Variant);
+        function    Cells(Col:Byte; Row:Word):string;
+        function    CellsInt(Col:Byte; Row:Word):Int64;
+        function    CellsDbl(Col:Byte; Row:Word):Double;
         procedure   SaveToFile(FileName:string; ShowHeaders:Boolean=False);
         function    LoadFromFile(FileName:string; Delimiter:AnsiChar=','):Integer;
         //---
+        property    RowSelected : Word read FGetSelRow;
+        property    CellSelected : TCellPos read FGetSelCell;
         property    OnClick : TTableMouseEvent read FClick write FClick;
         property    OnDblClick : TTableMouseEvent read FDblClick write FDblClick;
         //---
         property    ScrollBarType : TScrollStyle read FScrollStyle write SetScroll default ssNone;
-        property    Selectable : Boolean read FSelectable write SetSelectable default False;
         property    CanSort : Boolean read FCanSort write SetSortable default True;
         property    CanSearch : Boolean read FCanSearch write SetSearch default True;
         property    DateFormat : ShortString read FDateFormat write FDateFormat;
@@ -210,26 +215,26 @@ begin
     inc(FLastRow);
 end;
 //-----------------------------------------------------------------------------+
-procedure   TCCommonTable.RowInsert(ARow:Word;DelimitedText:string;Delimiter:AnsiChar);
-var i:Integer; row:TStringList;
+procedure   TCCommonTable.RowInsert(Row:Word;DelimitedText:string;Delimiter:AnsiChar);
+var i:Integer; list:TStringList;
 begin
-    if( FTable.RowCount < ARow + 2 )then FTable.RowCount:=ARow + 2;
+    if( FTable.RowCount < Row + 2 )then FTable.RowCount:=Row + 2;
     //---
     DelimitedText:=StringReplace(DelimitedText,#13,'',[rfReplaceAll, rfIgnoreCase]);
     DelimitedText:=StringReplace(DelimitedText,#10,'_',[rfReplaceAll, rfIgnoreCase]);
     //---
     try
-        row:=TStringList.Create;
-        row.Delimiter:=Delimiter;
-        row.DelimitedText:=DelimitedText;
-        row.Text:=StringReplace(row.Text,'_',' ',[rfReplaceAll, rfIgnoreCase]);
+        list:=TStringList.Create;
+        list.Delimiter:=Delimiter;
+        list.DelimitedText:=DelimitedText;
+        list.Text:=StringReplace(list.Text,'_',' ',[rfReplaceAll, rfIgnoreCase]);
         //---
-        if( row.Count > FTable.ColCount )then
-            for i:=0 to FTable.ColCount do FTable.Cells[i,FLastRow+1]:=Trim(row[i])
-            else FTable.Rows[FLastRow+1].AddStrings(row);row.count;
+        if( list.Count > FTable.ColCount )then
+            for i:=0 to FTable.ColCount do FTable.Cells[i,FLastRow+1]:=Trim(list[i])
+            else FTable.Rows[FLastRow+1].AddStrings(list);list.count;
         //---
-        FTable.Rows[ARow+1].AddStrings(row);
-        row.Free;
+        FTable.Rows[Row+1].AddStrings(list);
+        list.Free;
     except end;
     FLastRow:=RowsCount;
 end;
@@ -263,18 +268,34 @@ begin
     list.Free;
 end;
 //-----------------------------------------------------------------------------+
-procedure   TCCommonTable.GetSelectedRow(var Row:Integer; var List:TStrings);
+function    TCCommonTable.FGetSelRow:Word;begin Result:=FSelRow-1;end;
+//-----------------------------------------------------------------------------+
+function    TCCommonTable.FGetSelCell:TCellPos;begin Result.Col:=FSelColl;Result.Row:=FSelRow-1;end;
+//-----------------------------------------------------------------------------+
+function    TCCommonTable.Row(Row:Word):TStrings;
 begin
-    Row:=FSelRow-1;
-    List:=FTable.Rows[Row+1];
+    if( Row >= RowsCount )then Row:=RowsCount-1;
+    Result:=FTable.Rows[Row+1];
 end;
 //-----------------------------------------------------------------------------+
-procedure   TCCommonTable.GetSelectedCell(var ACol, ARow:Integer; var Text:string);
+procedure   TCCommonTable.CellInsert(Col:Byte; Row:Word; Val:Variant);
 begin
-    ACol:=FSelColl;
-    ARow:=FSelRow-1;
-    Text:=FTable.Cells[Acol,ARow+1];
+    if( Row >= RowsCount )then Row:=RowsCount-1;
+    if( Col >= FTable.ColCount )then Col:=FTable.ColCount-1;
+    FTable.Cells[Col,Row+1]:=VarToStr(Val);
 end;
+//-----------------------------------------------------------------------------+
+function    TCCommonTable.Cells(Col:Byte; Row:Word):string;
+begin
+    if( Row >= RowsCount )then Row:=RowsCount-1;
+    if( Col >= FTable.ColCount )then Col:=FTable.ColCount-1;
+    if( FAHeaders[Col].ctype = tcObject )then Exit;
+    Result:=FTable.Cells[Col,Row+1];
+end;
+//-----------------------------------------------------------------------------+
+function    TCCommonTable.CellsInt(Col:Byte; Row:Word):Int64;begin Result:=StrToInt64Def(Cells(Col,Row),0);end;
+//-----------------------------------------------------------------------------+
+function    TCCommonTable.CellsDbl(Col:Byte; Row:Word):Double;begin Result:=StrToFloatDef(Cells(Col,Row),0);end;
 //-----------------------------------------------------------------------------+
 function    TCCommonTable.IsCollumnSortable(AColl:Integer):Boolean;
 begin
@@ -286,7 +307,7 @@ begin
     Result:=True;
 end;
 //-----------------------------------------------------------------------------+
-procedure   TCCommonTable.AddColHeader(Name:ShortString;ColType:TTabColTypes;Align:TTabAllign;Width:Word);
+procedure   TCCommonTable.SetColHeader(Name:ShortString;ColType:TTabColTypes;Align:TTabAllign;Width:Word);
 begin
     if( Length(FAHeaders) <= FHdCount )then SetLength(FAHeaders,FHdCount+1);
     //---
@@ -512,7 +533,6 @@ end;
 //-----------------------------------------------------------------------------+
 procedure   TCCommonTable.FOnSelectCell(Sender: TObject; ACol, ARow: Integer; var CanSelect: Boolean);
 begin
-    //FSelColl:=ACol;
     FSelRow:=ARow;
 end;
 //-----------------------------------------------------------------------------+
@@ -532,7 +552,7 @@ begin
     FACol:=crd.X;
     FARow:=crd.Y;
     //---
-    FSelRow:=FARow-1;
+    FSelRow:=FARow;
     if( Button = mbLeft )then FSelColl:=FACol;
     //---
     if( FARow = 0 )then begin
@@ -876,8 +896,6 @@ begin
 end;
 //-----------------------------------------------------------------------------+
 procedure   TCCommonTable.SetScroll(ScrollStyle:TScrollStyle);begin FTable.ScrollBars:=ScrollStyle;end;
-//-----------------------------------------------------------------------------+
-procedure   TCCommonTable.SetSelectable(SetSelectable:Boolean);begin FSelectable:=SetSelectable;end;
 //-----------------------------------------------------------------------------+
 procedure   TCCommonTable.SetSortable(sort:Boolean);begin FCanSort:=sort; end;
 //-----------------------------------------------------------------------------+

@@ -59,7 +59,7 @@ type TCBaseTable = class
     public
         constructor Create(Grid:PStringGrid; ColCount:Word=2; RowCount:Word=5; RowHeight:Word=22);
         procedure   AutoWidth;
-        procedure   AddColHeader(Name:ShortString;ColType:TTabColTypes;Align:TTabAllign=taLeft;Width:Word=0);
+        procedure   SetColHeader(Name:ShortString;ColType:TTabColTypes;Align:TTabAllign=taLeft;Width:Word=0);
         procedure   RowAdd(DelimitedText:string;Delimiter:AnsiChar=',');
         procedure   RowInsert(ARow:Word;DelimitedText:string;Delimiter:AnsiChar=',');
         function    Row(Row:Word):TStrings;
@@ -219,7 +219,7 @@ begin
     list.Free;
 end;
 //-----------------------------------------------------------------------------+
-procedure   TCBaseTable.AddColHeader(Name:ShortString;ColType:TTabColTypes;Align:TTabAllign;Width:Word);
+procedure   TCBaseTable.SetColHeader(Name:ShortString;ColType:TTabColTypes;Align:TTabAllign;Width:Word);
 begin
     if( Length(FAHeaders) <= FHdCount )then SetLength(FAHeaders,FHdCount+1);
     //---
