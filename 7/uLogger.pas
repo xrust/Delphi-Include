@@ -1,6 +1,7 @@
 unit uLogger;
 {//+-----------------------------------------------------------------+
     New Logger Class, try to make it fast an furios
+	V1.02  add parameter UceVcl to LogInit function to call it with false in services
 }//+-----------------------------------------------------------------+
 interface
 //+------------------------------------------------------------------+
@@ -12,7 +13,7 @@ type TLogger = class(TThread)
     private
         FStop       : Boolean;
         FMemo       : TMemo;
-        FText       : ShortString;
+        FText       : string;
         FCapasity   : Word;
         FAppender   : ShortString;
         FFilePath   : string;
@@ -43,7 +44,7 @@ end;
 //+------------------------------------------------------------------+
 var CLog:TLogger;LogComp:TComponent=nil;IsLogInited:boolean=false;
 //+------------------------------------------------------------------+
-procedure   LogInit;
+procedure   LogInit(UceVcl:Boolean=True);
 function    PrintLn(Const Data : array of Variant):string;
 function    PrintF(Const Formatting : string; Const Data : array of const):string;
 function    GetLog(text:string=''):string;overload;
@@ -56,10 +57,14 @@ procedure   LogSetCapasity(CountOfLines:Integer);
 //+------------------------------------------------------------------+
 implementation
 //+------------------------------------------------------------------+
-procedure LogInit;
+procedure LogInit(UceVcl:Boolean=True);
 var i,ii:Integer;
 begin
     if( CLog <> nil )then Exit;
+    if( not UceVcl )then begin    //v1.02 for services
+        CLog:=TLogger.Create(nil);
+        Exit;
+    end;
     //---
     LogComp:=nil;
     for i:=0 to Screen.FormCount -1 do begin
@@ -185,7 +190,7 @@ end;
 function    TLogger.Print(text:string=''):string;
 var i:Integer;
 begin
-    Result:=CurrTimeToStr+' | '+text;
+    Result:=CurrTimeToStr+' | '+text;                
     FCash.Add(Result);
     if( not FBusy )then begin
         FSync.Enter;

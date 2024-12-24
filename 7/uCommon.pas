@@ -1,10 +1,11 @@
 unit uCommon;
 {//----------------------------------------------------------------------------+
-    Set Of Common Functions    
+    Set Of Common Functions
+	V1.03 add IsRightAddr add FileVersion 	
 }//----------------------------------------------------------------------------+
 interface
 //-----------------------------------------------------------------------------+
-uses Windows, Messages, SysUtils, Variants, Classes, Controls, Forms, StdCtrls, ExtCtrls, WinSock, Mask;
+uses Windows, Messages, SysUtils, Variants, Classes, Controls, Forms, StdCtrls, StrUtils, ExtCtrls, WinSock, Mask;
 //-----------------------------------------------------------------------------+
 const INT_MAX = 2147483647;
 const INT_MIN = -2147483647;
@@ -12,12 +13,20 @@ const UINT_MAX = 4294967295;
 const INT64_MAX = 9223372036854775807;
 const INT64_MIN = -9223372036854775807;
 //-----------------------------------------------------------------------------+
+type
+TStr16 = string[16];
+TStr32 = string[32];
+TStr64 = string[64];
+TStr128= string[128];
+//-----------------------------------------------------------------------------+
 type TTypeOfVars = (tvString,tvUint,tvInt,tvDouble,tvIpAddr,tvDate,tvTime,tvDateTime);
 //-----------------------------------------------------------------------------+
 procedure CheckKeyPress(TypeVar:TTypeOfVars; WinComp:TComponent; var Key: Char);
 //-----------------------------------------------------------------------------+
 function  HaveDir(const fn:string; const create:boolean=true):boolean;
 function  GetLocalIP: String;
+function  IsRightAddr(InConnectAddr:string;AllowedIPs:string='*'):Boolean;
+function  FileVersion(AFileName: string): string;
 function  IntToStr64(Value: Int64): string;
 function  VarToString(Value: Variant):String;overload;
 function  VarToStringF(Value: Variant; Digits:Integer=8):String;overload
@@ -40,6 +49,10 @@ function iDec(val:LongWord;i:LongWord=1):LongWord;overload;
 function iDec(val:Integer;i:Integer=1):Integer;overload;
 function iDec(val:Int64;i:Int64=1):Int64;overload;
 //-----------------------------------------------------------------------------+
+function CheckStringMask(Mask,Check:string):Boolean; overload;                 //| Сравнение по маске идентичное CheckGroupMask от Метаквотов
+function CheckStringMask(Mask:string; Check:Integer):Boolean;overload;
+function CheckStringMask(Mask:string; Check:Double):Boolean; overload;
+//-----------------------------------------------------------------------------+
 implementation
 //-----------------------------------------------------------------------------+
 function iInc(val:Byte;i:Byte=1):Byte;overload;begin inc(val,i);Result:=val;end;
@@ -56,6 +69,100 @@ function iDec(val:LongWord;i:LongWord=1):LongWord;overload;begin Dec(val,i);Resu
 function iDec(val:Integer;i:Integer=1):Integer;overload;begin Dec(val,i);Result:=val;end;
 function iDec(val:Int64;i:Int64=1):Int64;overload;begin Dec(val,i);Result:=val;end;
 //-----------------------------------------------------------------------------+
+//| Сравнение по маске идентичное CheckGroupMask от Метаквотов
+//-----------------------------------------------------------------------------+
+function CheckStringMask(Mask:string; Check:Double):Boolean;overload;
+var iCheck:string;
+begin
+    iCheck:=FloatToStr(Check);
+    Result:=CheckStringMask(Mask,iCheck);
+end;
+//-----------------------------------------------------------------------------+
+function CheckStringMask(Mask:string; Check:Integer):Boolean;overload;
+var iCheck:string;
+begin
+    iCheck:=IntToStr(Check);
+    Result:=CheckStringMask(Mask,iCheck);
+end;
+//-----------------------------------------------------------------------------+
+function CheckStringMask(Mask,Check:string):Boolean;overload;
+var
+no,ps,pe:Boolean;
+i,n,p,p1,p2:Integer;
+spell:string;
+list:TStringList;
+begin
+    Result:=False;
+    Mask:=StringReplace(Mask,' ','',[rfReplaceAll, rfIgnoreCase]);
+    if( Mask = '' )then Exit;
+    Result:=True;
+    if( Mask = '*' )then Exit;
+    if( Mask = '*,' )then Exit;
+    if( Mask = ',*' )then Exit;
+    if( Mask = ',*,' )then Exit;
+    //---
+    Result:=False;
+    list:=TStringList.Create;
+    list.CommaText:=Mask;
+    for i:=0 to list.Count-1 do begin
+        spell :=list[i];
+        if( spell = '*' )then begin                     // выходим безусловно
+            Result:=True;
+            Break;
+        end else begin
+            if( AnsiPos('!',spell) = 1 )then begin      // нашли отрицание вначале
+                no:=True;                               // отметили что отрицаем
+                Delete(spell,1,1);                      // удалили знак отрицания
+                if( spell = '*' )then begin             // это отрицание всего выходим
+                    Result:=False;
+                    Break;
+                end;
+            end else begin
+                no:=False;                              // отрицания нет или оно не в начале не обращаем внимания
+            end;
+            //---
+            ps:=False;
+            pe:=False;
+            p:=AnsiPos('*',spell);
+            if( p = 1 )then begin
+                ps:=True;
+                Delete(spell,1,1);
+            end;
+            p:=AnsiPos('*',spell);
+            if( p > 0 )then begin
+                pe:=True;
+                spell:=AnsiLeftStr(spell,p-1);
+            end;
+            //---
+            if( not ps )and( not pe )then begin          // если нет звезда то только по полному совпадению
+                if( Check = spell )then begin
+                    Result:=not no;                      // если при этом есть отрицание , то отвергаем, если нет одобряем
+                    Break;
+                end;    
+            end;
+            if( not ps )and( pe )then begin              // если звезда в конце
+                if( AnsiStartsStr(spell,check) )then begin
+                    Result:=not no;
+                    Break;
+                end;    
+            end;
+            if( ps )and(not pe )then begin               // если звезда в начале
+                if( AnsiEndsStr(spell, Check) )then begin
+                    Result:=not no;
+                    Break;
+                end;
+            end;
+            if( ps )and( pe )then begin                  // если звезда и в начале и в конце
+                if( AnsiPos(spell, Check) > 0 )then begin
+                    Result:=not no;
+                    Break;
+                end;
+            end;
+        end;
+    end;
+    list.Free;
+end;
+//+------------------------------------------------------------------+
 procedure CheckKeyPress(TypeVar:TTypeOfVars; WinComp:TComponent; var Key: Char);
 var text:string;
 begin
@@ -296,6 +403,92 @@ begin
         end;
         WSACleanup;
     end;
+end;
+//-----------------------------------------------------------------------------+
+function FileVersion(AFileName: string): string;
+var
+szName: array[0..255] of Char;
+P: Pointer;
+Value: Pointer;
+Len: UINT;
+GetTranslationString: string;
+FFileName: PChar;
+FValid: boolean;
+FSize: DWORD;
+FHandle: DWORD;
+FBuffer: PChar;
+begin
+    try
+        FFileName := StrPCopy(StrAlloc(Length(AFileName) + 1), AFileName);
+        FValid := False;
+        FSize := GetFileVersionInfoSize(FFileName, FHandle);
+        if FSize > 0 then begin
+            try
+                GetMem(FBuffer, FSize);
+                FValid := GetFileVersionInfo(FFileName, FHandle, FSize, FBuffer);
+            except
+                FValid := False;
+                raise;
+            end;
+        end;
+        Result := '';
+        if FValid then VerQueryValue(FBuffer, '\VarFileInfo\Translation', p, Len) else p := nil;
+        if P <> nil then GetTranslationString := IntToHex(MakeLong(HiWord(Longint(P^)), LoWord(Longint(P^))), 8);
+        if FValid then begin
+            StrPCopy(szName, '\StringFileInfo\' + GetTranslationString + '\FileVersion');
+            if VerQueryValue(FBuffer, szName, Value, Len) then Result := StrPas(PChar(Value));
+        end;
+    finally
+        try
+            if FBuffer <> nil then
+            FreeMem(FBuffer, FSize);
+        except
+        end;
+        try
+            StrDispose(FFileName);
+        except
+        end;
+    end;
+end;
+//-----------------------------------------------------------------------------+
+function IsRightAddr(InConnectAddr:string;AllowedIPs:string='*'):Boolean;
+var
+i,ii:Integer;
+list:TStringList;
+addr:string;
+ignore,found:Boolean;
+begin
+    Result:=True;
+    if( AllowedIPs = '' )or(AllowedIPs = '*')then Exit;                                             // разрешаем всe
+    //---
+    InConnectAddr:=StringReplace(InConnectAddr,'.','',[rfReplaceAll, rfIgnoreCase]);                // убрали разделители во входЯщем айпи
+    AllowedIPs:=StringReplace(AllowedIPs,' ','',[rfReplaceAll, rfIgnoreCase]);                      // удалили пропуски в списке разрешенных
+    AllowedIPs:=StringReplace(AllowedIPs,'.','',[rfReplaceAll, rfIgnoreCase]);                      // убрали разделители в списке разрешенных
+    AllowedIPs:=StringReplace(AllowedIPs,';',',',[rfReplaceAll, rfIgnoreCase]);                     // если разделители ; поменЯли на запЯтые
+    //---
+    Result:=False;
+    list:=TStringList.Create;
+    list.CommaText:=AllowedIPs;                                                                     // залили список разрешенных в лист
+    for i:=0 to list.Count-1 do begin
+        ignore:=False;
+        addr:=list[i];
+        if( Pos('!',addr) = 1 )then begin                                                           // если нашли отрицание, то отметили
+            ignore:=True;
+            Delete(addr,1,1);
+        end;
+        //---
+        found:=True;
+        for ii:=1 to Length(addr)do begin                                                           // сравниваем строки посимвольно
+            if( addr[ii] <> InConnectAddr[ii] )then begin
+                if( addr[ii] <> '*' )then found:=False;                                             // нашли отличиЯ запрещаем , если только это не знак разрешениЯ всего
+            end;
+        end;
+        //---
+        if( not ignore )then Result:=found                                                          // если нет отрицаниЯ, то вовравращаем совпадение
+            else Result:= not found;                                                                // если совпало по отрицанию - отрицаем
+    end;
+    //---
+    list.Free;
 end;
 //-----------------------------------------------------------------------------+
 procedure ArrSort(var Data:array of Integer; SortByDecrement:Boolean=False);overload;

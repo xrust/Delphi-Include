@@ -1,6 +1,8 @@
 unit uNixTime;
 {//+-----------------------------------------------------------------+
     Set Of Functions To Convert UNIX Time <-> TDateTime
+	V2.01
+    V2.02 fix LastUTimeMinute function
 }//+-----------------------------------------------------------------+
 interface
 //+------------------------------------------------------------------+
@@ -43,8 +45,8 @@ function DayStartTime(UnixDtm:Int64=0):Int64;overload;              // Returns U
 function IsNewUnixDay:Boolean;                                      // Returns true if The New day Starts between requests
 function IsNewUtcDay:Boolean;                                       // Returns true if The New UTC day Starts between requests
 function IsNewUTimeMinute:Boolean;                                  // Returns "True" If The New Minute Started
-function LastUTimeMinute:Cardinal;                                  // Returns Last Minute Unix Start Time
-function LastUTimeMinute64:Int64;                                   // Returns Last Minute Unix Start Time Int64
+function LastUTimeMinute:Int64;                                  	// Returns Last Minute Unix Start Time
+function LastUtcTimeMinute:Int64;                                   // Returns Last Minute Unix Start Time Int64
 //+------------------------------------------------------------------+
 function CurrTimeToStr(const format:TDtmType=DTM_DATETIME_MS):ShortString;                          // Returns Current Time As Formatted String
 function FormatUnixTime(uTime:Int64; const format:TDtmType):ShortString;overload;      // Unix Time To Date Time String
@@ -57,6 +59,7 @@ function FileTimeToDateTime(FileTime: TFileTime): TDateTime;	    // Преобразовыв
 function FileGetUnixTime(path:string):LongInt;                      // Возвращает время создания\измения файла в юникс веремени
 //+------------------------------------------------------------------+
 var GPrevTime   : Int64=0;
+	GLastMinute : Int64=0; 
     GPrevDay    : Int64=0;
     GPrevUtcDay : Int64=0;
     GmtOffset   : Int64=0;
@@ -92,7 +95,7 @@ function UnixTimeCurrentMs:Int64;begin Result:=Trunc((Now-25569.0)*86400*1000);e
 //+------------------------------------------------------------------+
 function UnixTimeCurrentMsDbl:Double;begin Result:=(Now-25569.0)*86400;end;
 //+------------------------------------------------------------------+
-function DtmToUnixTime(Dtm:TDateTime):Int64;begin Result:=Trunc((Dtm-25569.0)*86400);end;
+function DtmToUnixTime(Dtm:TDateTime):Int64;begin Result:=Round((Dtm-25569.0)*86400);end;
 //+------------------------------------------------------------------+
 function DtmToUnixTimeMs(Dtm:TDateTime):Int64;begin Result:=Trunc((Dtm-25569.0)*86400*1000);end;
 //+------------------------------------------------------------------+
@@ -206,25 +209,20 @@ begin
     end;
 end;
 //+------------------------------------------------------------------+
-function LastUTimeMinute:Cardinal;var cTime:Cardinal;
+function LastUTimeMinute:Int64;var cTime:Int64;
 begin
     cTime := Trunc((Now-25569.0)*86400);
     if( cTime mod 60 = 0 )then begin
-        Result:=cTime-60;
+        if( GLastMinute <> cTime mod 60 )then begin                   //V2.02
+            GLastMinute := cTime mod 60;
+            Result:=cTime-60;
+        end else Result:=cTime-(cTime mod 60);
     end else begin
         Result:=cTime-(cTime mod 60);
     end;
 end;
 //+------------------------------------------------------------------+
-function LastUTimeMinute64:Int64;var cTime:Cardinal;
-begin
-    cTime := Trunc((Now-25569.0)*86400);
-    if( cTime mod 60 = 0 )then begin
-        Result:=cTime-60;
-    end else begin
-        Result:=cTime-(cTime mod 60);
-    end;
-end;
+function LastUtcTimeMinute:Int64;begin Result:=LastUTimeMinute+GetGmtOffsetSec;end;
 //+------------------------------------------------------------------+
 function DayStartTime(Dtm:TDateTime=0):Int64;var cTime:Int64;
 begin
