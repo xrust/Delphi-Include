@@ -1,10 +1,25 @@
-unit uLogger;
-{//+-----------------------------------------------------------------+
-    New Logger Class, try to make it fast an furios
+﻿unit uLogger64;
+{//+-----------------------------------------------------------------α
+    New Logger Class for Delphi(12) Windows Platform 32 and 64 bits
 }//+-----------------------------------------------------------------+
 interface
 //+------------------------------------------------------------------+
-uses Windows, Messages, SysUtils, Variants, Classes, Controls, Forms, Dialogs, StdCtrls, SyncObjs, uCommon, uNixTime;
+uses
+Winapi.Windows,
+Winapi.Messages,
+Winapi.WinSock,
+//---
+System.SysUtils,
+System.Types,
+System.Classes,
+System.Variants,
+System.SyncObjs,
+//---
+VCL.Forms,
+VCL.StdCtrls,
+VCL.ExtCtrls,
+uCommon64,
+uNixTime64;
 //+------------------------------------------------------------------+
 type PMemo = ^TMemo;
 //+------------------------------------------------------------------+
@@ -12,7 +27,7 @@ type TLogger = class(TThread)
     private
         FStop       : Boolean;
         FMemo       : TMemo;
-        FText       : ShortString;
+        FText       : string;
         FCapasity   : Word;
         FAppender   : ShortString;
         FFilePath   : string;
@@ -144,7 +159,7 @@ begin
     FList:=TStringList.Create;
     FSync:=TCriticalSection.Create;
     //--- formatting log file name and create file folder
-    fn:=ExtractFileName(Application.ExeName);
+    fn:=ExtractFileName(paramstr(0));
     Delete(fn,Pos('.',fn),100);
     FFilePath:=extractfilepath(paramstr(0))+fn+'\';
     HaveDir(FFilePath,True);                                                                        
@@ -157,7 +172,7 @@ begin
     Self.FreeOnTerminate:=False;
 end;
 //+------------------------------------------------------------------+
-procedure   TLogger.Clear;begin if( FMemo <> nil )then FMemo.Clear;end;
+procedure   TLogger.Clear;begin if( FMemo <> nil )then FMemo.Lines.Clear;end;
 //+------------------------------------------------------------------+
 procedure   TLogger.JumpToEnd;
 begin
@@ -172,7 +187,7 @@ function    TLogger.GetLog(text:string=''):string;begin Result:=Print(text);end;
 function    TLogger.Print(Value: Variant):string;
 var i:Integer;
 begin
-    Result:=CurrTimeToStr+' | '+VarToString(Value);
+    Result:=string(CurrTimeToStr)+' | '+VarToString(Value);
     FCash.Add(Result);
     if( not FBusy )then begin
         FSync.Enter;
@@ -185,7 +200,7 @@ end;
 function    TLogger.Print(text:string=''):string;
 var i:Integer;
 begin
-    Result:=CurrTimeToStr+' | '+text;
+    Result:=string(CurrTimeToStr)+' | '+text;
     FCash.Add(Result);
     if( not FBusy )then begin
         FSync.Enter;
@@ -198,14 +213,14 @@ end;
 function    TLogger.PrintLn(Const Data : array of Variant):string;
 var i:Integer;text:string;
 begin
-    DecimalSeparator:='.';
+    FormatSettings.DecimalSeparator:='.';
     for i:=0 to Length(Data)-1 do text:=text+VarToString(Data[i]);
     Result:=Print(text);
 end;
 //+------------------------------------------------------------------+
-function    TLogger.PrintF(Const Formatting : string; Const Data : array of const):string;begin DecimalSeparator:='.';Result:=Print(Format(Formatting,Data));end;
+function    TLogger.PrintF(Const Formatting : string; Const Data : array of const):string;begin FormatSettings.DecimalSeparator:='.';Result:=Print(Format(Formatting,Data));end;
 //+------------------------------------------------------------------+
-procedure   TLogger.MemoLineAdd;begin if( FText <> '' )then FMemo.Lines.Add(FText);FText:='';end;
+procedure   TLogger.MemoLineAdd;begin if( FText <> '' )then FMemo.Lines.Add(string(FText));FText:='';end;
 //+------------------------------------------------------------------+
 procedure   TLogger.MemoLinesDel;begin while( FMemo.Lines.Count > FCapasity )do FMemo.Lines.Delete(0);end;
 //+------------------------------------------------------------------+
@@ -235,7 +250,7 @@ begin
         try
             if( FMemo <> nil )then begin
                 for i:=0 to list.Count-1 do begin
-                    FText:=list[i];
+                    FText:=ShortString(list[i]);
                     Synchronize(MemoLineAdd);
                 end;
                 if( FCapasity > 0 )then Synchronize(MemoLinesDel);
@@ -248,7 +263,7 @@ begin
         end;
         //---
         try
-            path:=FFilePath+FormatDateTime('yyyymmdd',Now)+FAppender+'.log';
+            path:=FFilePath+FormatDateTime('yyyymmdd',Now)+string(FAppender)+'.log';
             AssignFile(fhd,path);
             if(not FileExists(path))then begin
                 ReWrite(fhd);
@@ -260,7 +275,7 @@ begin
             CloseFile(fhd);
         except
             on E : Exception do begin
-                FText:=('Log File Writing ERROR : '+E.ClassName+' : '+E.Message);
+                FText:=ShortString('Log File Writing ERROR : '+E.ClassName+' : '+E.Message);
                 Synchronize(MemoLineAdd);
                 E:=nil;
             end;

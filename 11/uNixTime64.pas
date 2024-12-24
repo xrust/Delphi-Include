@@ -1,10 +1,11 @@
-unit uNixTime;
-{//+-----------------------------------------------------------------+
-    Set Of Functions To Convert UNIX Time <-> TDateTime
+п»їunit uNixTime64;
+{//+-----------------------------------------------------------------О±
+    Set Of Functions To Convert UNIX Time <-> TDateTime for Delphi(12) Windows Platform 32 and 64 bits
+	V2.02 fix LastUTimeMinute function
 }//+-----------------------------------------------------------------+
 interface
 //+------------------------------------------------------------------+
-uses Windows, SysUtils, StrUtils, DateUtils, Math;
+uses  Windows, SysUtils, StrUtils, DateUtils, Math;
 //+------------------------------------------------------------------+
 type TDtmType = (DTM_DATE, DTM_TIME, DTM_DATETIME, DTM_DATETIME_MS);
 //+------------------------------------------------------------------+
@@ -30,8 +31,8 @@ function DtmToUnixTimeMsDbl(Dtm:TDateTime):Double;                  // Convert T
 //+------------------------------------------------------------------+
 function UnixTimeToDtm(UTime:Int64):TDateTime;overload;             // Convert UNIX Time To Borland TDateTime
 function UnixTimeToDtm(UTime:Cardinal):TDateTime;overload;          // Convert UNIX Time To Borland TDateTime
-function UnixTimeMsToDtm(UTime:Int64):TDateTime;overload;           // Convert UNIX Miliseconds Time To Borland TDateTime
-function UnixTimeMsToDtm(UTime:Double):TDateTime;overload;          // Convert UNIX Miliseconds Time To Borland TDateTime
+function UnixTimeMsToDtm(UTime:Int64):TDateTime;           // Convert UNIX Miliseconds Time To Borland TDateTime
+function UnixTimeMsToDtmDbl(UTime:Double):TDateTime;          // Convert UNIX Miliseconds Time To Borland TDateTime
 //+------------------------------------------------------------------+
 function GetMsOfCurrTime:Int64;                                     // Returns Miliseconds Of Current Time
 function GetMsOfDateTime(Dtm:TDateTime):Int64;                      // Returns Miliseconds Of Gived TDateTime
@@ -46,17 +47,18 @@ function IsNewUTimeMinute:Boolean;                                  // Returns "
 function LastUTimeMinute:Cardinal;                                  // Returns Last Minute Unix Start Time
 function LastUTimeMinute64:Int64;                                   // Returns Last Minute Unix Start Time Int64
 //+------------------------------------------------------------------+
-function CurrTimeToStr(const format:TDtmType=DTM_DATETIME_MS):ShortString;                          // Returns Current Time As Formatted String
-function FormatUnixTime(uTime:Int64; const format:TDtmType):ShortString;overload;      // Unix Time To Date Time String
-function FormatUnixTime(uTime:Int64; const format:string='yyyy.mm.dd hh:nn:ss'):ShortString;overload;
-function FormatUnixTimeMs(uTime:Int64; const format:TDtmType):ShortString;overload;
-function FormatUnixTimeMs(uTimeMs:Int64; const format:string='yyyy.mm.dd hh:nn:ss.zzz'):ShortString;overload;
-function FormatUnixTimeMs(uTimeMs:Double; const format:string='yyyy.mm.dd hh:nn:ss.zzz'):ShortString;overload;
+function CurrTimeToStr(const format:TDtmType=DTM_DATETIME_MS):string;                          // Returns Current Time As Formatted String
+function FormatUnixTime(uTime:Int64; const format:TDtmType):string;overload;      // Unix Time To Date Time String
+function FormatUnixTime(uTime:Int64; const format:string='yyyy.mm.dd hh:nn:ss'):string;overload;
+function FormatUnixTimeMs(uTime:Int64; const format:TDtmType):string;overload;
+function FormatUnixTimeMs(uTimeMs:Int64; const format:string='yyyy.mm.dd hh:nn:ss.zzz'):string;overload;
+function FormatUnixTimeMsDbl(uTimeMs:Double; const format:string='yyyy.mm.dd hh:nn:ss.zzz'):string;
 //+------------------------------------------------------------------+
-function FileTimeToDateTime(FileTime: TFileTime): TDateTime;	    // Преобразовывает время в формате файлового времени в борланд формат
-function FileGetUnixTime(path:string):LongInt;                      // Возвращает время создания\измения файла в юникс веремени
+function FileTimeToDateTime(FileTime: TFileTime): TDateTime;	    // РџСЂРµРѕР±СЂР°Р·РѕРІС‹РІР°РµС‚ РІСЂРµРјСЏ РІ С„РѕСЂРјР°С‚Рµ С„Р°Р№Р»РѕРІРѕРіРѕ РІСЂРµРјРµРЅРё РІ Р±РѕСЂР»Р°РЅРґ С„РѕСЂРјР°С‚
+function FileGetUnixTime(path:string):LongInt;                      // Р’РѕР·РІСЂР°С‰Р°РµС‚ РІСЂРµРјСЏ СЃРѕР·РґР°РЅРёСЏ\РёР·РјРµРЅРёСЏ С„Р°Р№Р»Р° РІ СЋРЅРёРєСЃ РІРµСЂРµРјРµРЅРё
 //+------------------------------------------------------------------+
 var GPrevTime   : Int64=0;
+    GLastMinute : Int64=0;
     GPrevDay    : Int64=0;
     GPrevUtcDay : Int64=0;
     GmtOffset   : Int64=0;
@@ -92,7 +94,7 @@ function UnixTimeCurrentMs:Int64;begin Result:=Trunc((Now-25569.0)*86400*1000);e
 //+------------------------------------------------------------------+
 function UnixTimeCurrentMsDbl:Double;begin Result:=(Now-25569.0)*86400;end;
 //+------------------------------------------------------------------+
-function DtmToUnixTime(Dtm:TDateTime):Int64;begin Result:=Trunc((Dtm-25569.0)*86400);end;
+function DtmToUnixTime(Dtm:TDateTime):Int64;begin Result:=Round((Dtm-25569.0)*86400);end;
 //+------------------------------------------------------------------+
 function DtmToUnixTimeMs(Dtm:TDateTime):Int64;begin Result:=Trunc((Dtm-25569.0)*86400*1000);end;
 //+------------------------------------------------------------------+
@@ -124,15 +126,15 @@ function UnixTimeToDtm(UTime:Cardinal):TDateTime;begin Result := (UTime / 86400)
 //+------------------------------------------------------------------+
 function UnixTimeMsToDtm(UTime:Int64):TDateTime;begin Result := (UTime / (86400*1000)) + 25569.0;end;
 //+------------------------------------------------------------------+
-function UnixTimeMsToDtm(UTime:Double):TDateTime;begin Result := (UTime / 86400) + 25569.0;end;
+function UnixTimeMsToDtmDbl(UTime:Double):TDateTime;begin Result := (UTime / 86400) + 25569.0;end;
 //+------------------------------------------------------------------+
-function FormatUnixTime(uTime:Int64; const format:string='yyyy.mm.dd hh:nn:ss'):ShortString; begin Result:=FormatDateTime(format,UnixTimeToDtm(uTime));end;
+function FormatUnixTime(uTime:Int64; const format:string='yyyy.mm.dd hh:nn:ss'):string; begin Result:=FormatDateTime(format,UnixTimeToDtm(uTime));end;
 //+------------------------------------------------------------------+
-function FormatUnixTimeMs(uTimeMs:Int64; const format:string='yyyy.mm.dd hh:nn:ss.zzz'):ShortString;begin Result:=FormatDateTime(format,UnixTimeMsToDtm(uTimeMs));end;
+function FormatUnixTimeMs(uTimeMs:Int64; const format:string='yyyy.mm.dd hh:nn:ss.zzz'):string;begin Result:=FormatDateTime(format,UnixTimeMsToDtm(uTimeMs));end;
 //+------------------------------------------------------------------+
-function FormatUnixTimeMs(uTimeMs:Double; const format:string='yyyy.mm.dd hh:nn:ss.zzz'):ShortString;begin Result:=FormatDateTime(format,UnixTimeMsToDtm(uTimeMs));end;
+function FormatUnixTimeMsDbl(uTimeMs:Double; const format:string='yyyy.mm.dd hh:nn:ss.zzz'):string;begin Result:=FormatDateTime(format,UnixTimeMsToDtmDbl(uTimeMs));end;
 //+------------------------------------------------------------------+
-function FormatUnixTime(uTime:Int64; const format:TDtmType):ShortString;overload;
+function FormatUnixTime(uTime:Int64; const format:TDtmType):string;overload;
 begin
     case format of
         DTM_DATETIME : Result:=FormatDateTime('yyyy.mm.dd hh:nn:ss',UnixTimeToDtm(uTime));
@@ -143,7 +145,7 @@ begin
     end;
 end;
 //+------------------------------------------------------------------+
-function FormatUnixTimeMs(uTime:Int64; const format:TDtmType):ShortString;overload;
+function FormatUnixTimeMs(uTime:Int64; const format:TDtmType):string;overload;
 begin
     case format of
         DTM_DATETIME : Result:=FormatDateTime('yyyy.mm.dd hh:nn:ss',UnixTimeToDtm(uTime));
@@ -155,7 +157,7 @@ begin
     end;
 end;
 //+------------------------------------------------------------------+
-function CurrTimeToStr(const format:TDtmType=DTM_DATETIME_MS):ShortString;
+function CurrTimeToStr(const format:TDtmType=DTM_DATETIME_MS):string;
 begin
     case format of
         DTM_DATETIME_MS : Result:=FormatDateTime('yyyy.mm.dd hh:nn:ss.zzz',Now);
@@ -210,7 +212,10 @@ function LastUTimeMinute:Cardinal;var cTime:Cardinal;
 begin
     cTime := Trunc((Now-25569.0)*86400);
     if( cTime mod 60 = 0 )then begin
-        Result:=cTime-60;
+        if( GLastMinute <> cTime mod 60 )then begin                   //V2.02
+            GLastMinute := cTime mod 60;
+            Result:=cTime-60;
+        end else Result:=cTime-(cTime mod 60);
     end else begin
         Result:=cTime-(cTime mod 60);
     end;
@@ -271,7 +276,7 @@ var sr:TSearchRec;
 begin
     Result:=-1;
     if( FindFirst(path,faAnyFile,sr) = 0 )then begin
-        Result:=DtmToUnixTime(FileDateToDateTime(sr.Time));
+        Result:=DtmToUnixTime(sr.CreationTime);
         FindClose(sr);
     end;
 end;
