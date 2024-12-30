@@ -2,6 +2,7 @@ unit uLogger;
 {//+-----------------------------------------------------------------+
     New Logger Class, try to make it fast an furios
 	V1.02  add parameter UceVcl to LogInit function to call it with false in services
+    v1.03  add DirectLog and DirectLn functions that print to memo and file directly without thread
 }//+-----------------------------------------------------------------+
 interface
 //+------------------------------------------------------------------+
@@ -38,6 +39,8 @@ type TLogger = class(TThread)
         function    Print(Value: Variant):string;overload;
         function    PrintF(Const Formatting : string; Const Data : array of const):string;
         function    PrintLn(Const Data : array of Variant):string;
+        function    DirectLog(text:string=''):string;
+        function    DirectLn(Const Data : array of Variant):string;
         property    ClearIfNewDay : Boolean read FAutoClear write FAutoClear default False;
         property    Capasity : Word read FCapasity write FCapasity default 0;
 end;
@@ -158,7 +161,7 @@ begin
     //---
     FStop:=False;
     inherited Create(False);
-    Self.Priority:=tpNormal;
+    Self.Priority:=tpHighest;
     Self.FreeOnTerminate:=False;
 end;
 //+------------------------------------------------------------------+
@@ -276,6 +279,46 @@ begin
         Sleep(1);
     end;
     list.Free;
+end;
+//+------------------------------------------------------------------+
+function TLogger.DirectLn(const Data: array of Variant): string;
+var i:Integer;text:string;
+begin
+    DecimalSeparator:='.';
+    for i:=0 to Length(Data)-1 do text:=text+VarToString(Data[i]);
+    Result:=DirectLog(text);
+end;
+//+------------------------------------------------------------------+
+function TLogger.DirectLog(text: string): string;
+var fhd:TextFile;path:string;
+begin
+    try
+        text:=CurrTimeToStr+' Direct | '+text;
+        if( FMemo <> nil )then FMemo.Lines.Add(text);
+    except
+        on E : Exception do begin
+            text:=text+'TMemo Direct Writing ERROR : '+E.ClassName+' : '+E.Message;
+            E:=nil;
+        end;
+    end;
+    try
+        path:=FFilePath+FormatDateTime('yyyymmdd',Now)+FAppender+'.log';
+        AssignFile(fhd,path);
+        if(not FileExists(path))then begin
+            ReWrite(fhd);
+            if( FAutoClear )then Clear;
+        end else begin
+            Append(fhd);
+        end;
+        WriteLn(fhd,text);
+        CloseFile(fhd);
+    except
+        on E : Exception do begin
+            text:=text+'Log File Direct Writing ERROR : '+E.ClassName+' : '+E.Message;
+            //Synchronize(MemoLineAdd);
+            E:=nil;
+        end;
+    end;
 end;
 //+------------------------------------------------------------------+
 end.

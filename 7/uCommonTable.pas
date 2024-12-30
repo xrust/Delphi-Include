@@ -1,11 +1,13 @@
 unit uCommonTable;
 {//----------------------------------------------------------------------------+
     Extended Common Table class Based on Base Table. Can Sort and Search
+    v1.3 add columns auto width by content length
+    v1.4 add editing cell with TEdit
 }//----------------------------------------------------------------------------+
 interface
 //-----------------------------------------------------------------------------+
 uses Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-     Dialogs, StdCtrls, Buttons, ExtCtrls, Grids, uNixTime, uLogger;
+     Dialogs, StdCtrls, Buttons, ExtCtrls, Math, Grids, uNixTime, uLogger;
 //-----------------------------------------------------------------------------+
 type PStringGrid = ^TStringGrid;
 //-----------------------------------------------------------------------------+
@@ -17,6 +19,7 @@ type TCellPos = record Col,Row:Word;end;
 type TRHeader = record
     width   : Word;
     calcWidth : Word;
+    maxTxtLen : Word;
     newWidth: Word;
     ctype   : TTabColTypes;
     align   : TTabAllign;
@@ -24,10 +27,11 @@ type TRHeader = record
 end;
 type TAHeaders = array of TRHeader;
 //-----------------------------------------------------------------------------+
-type TTableMouseEvent = procedure(ACol, ARow: Integer; IsRightClick:Boolean)of object;
+type TTableMouseEvent = procedure(ACol, ARow: Word; IsRightClick:Boolean)of object;
 //-----------------------------------------------------------------------------+
 type TCCommonTable = class
     private
+        FValAutoWith: Boolean;
         //--- sorting
         FCanSort    : Boolean;
         FSortPos    : Integer;
@@ -39,6 +43,12 @@ type TCCommonTable = class
         FLSearchPos : Integer;
         FLSelColl   : Integer;
         FScrollStyle: TScrollStyle;
+        //--- editing
+        FCanEdit    : Boolean;
+        FReadOnly   : Boolean;
+        FEdit       : TEdit;
+        FEditxPos   : Integer;
+        FEdityPos   : Integer;
         //---
         FClick      : TTableMouseEvent;
         FDblClick   : TTableMouseEvent;
@@ -84,7 +94,7 @@ type TCCommonTable = class
         //---
         FTable      : PStringGrid;
         //---
-        function    RowsCount:Word;
+
         procedure   FOnDrawCell(Sender: TObject; ACol, ARow: Integer; Rect: TRect; State: TGridDrawState);
         procedure   FOnMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
         procedure   FOnMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
@@ -93,9 +103,13 @@ type TCCommonTable = class
         procedure   FOnDblClick(Sender: TObject);
         procedure   FOnKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
         procedure   FOnSelectCell(Sender: TObject; ACol, ARow: Integer; var CanSelect: Boolean);
+        //---
+        procedure   FEditOnExit(Sender: TObject);
     public
         constructor Create(Grid:PStringGrid; ColCount:Word=2; RowCount:Word=5; RowHeight:Word=22);
+        procedure   RebuildTable(ColCount:Word=2; RowCount:Word=5; RowHeight:Word=22);
         procedure   AutoWidth;
+        procedure   Clear;
         procedure   SetColHeader(Name:ShortString;ColType:TTabColTypes;Align:TTabAllign=taLeft;Width:Word=0);
         procedure   RowAdd(DelimitedText:string;Delimiter:AnsiChar=',');
         procedure   RowInsert(Row:Word;DelimitedText:string;Delimiter:AnsiChar=',');
@@ -107,6 +121,8 @@ type TCCommonTable = class
         procedure   SaveToFile(FileName:string; ShowHeaders:Boolean=False);
         function    LoadFromFile(FileName:string; Delimiter:AnsiChar=','):Integer;
         //---
+        function    RowsCount:Word;
+        property    ColsCount : Word read FColCount;
         property    RowSelected : Word read FGetSelRow;
         property    CellSelected : TCellPos read FGetSelCell;
         property    OnClick : TTableMouseEvent read FClick write FClick;
@@ -115,11 +131,42 @@ type TCCommonTable = class
         property    ScrollBarType : TScrollStyle read FScrollStyle write SetScroll default ssNone;
         property    CanSort : Boolean read FCanSort write SetSortable default True;
         property    CanSearch : Boolean read FCanSearch write SetSearch default True;
+        property    CanEdit : Boolean read FCanEdit write FCanEdit default True;
+        property    CellsReadOnly : Boolean read FReadOnly write FReadOnly default True;
+        property    ColValAutoWidth : Boolean read FValAutoWith write FValAutoWith default True;
         property    DateFormat : ShortString read FDateFormat write FDateFormat;
         property    TimeFormat : ShortString read FTimeFormat write FTimeFormat;
 end;
 //-----------------------------------------------------------------------------+
 implementation
+//-----------------------------------------------------------------------------+
+procedure TCCommonTable.RebuildTable(ColCount, RowCount, RowHeight: Word);var i:Integer;
+begin
+    FRowHeigth:=RowHeight;
+    FColCount:=ColCount;
+    FRowCount:=RowCount;
+    //---
+    Clear;
+    //---
+    FHdCount:=0;
+    SetLength(FAHeaders,ColCount);
+    for i:=0 to Length(FAHeaders)-1 do begin
+        FAHeaders[i].width:=0;
+        FAHeaders[i].calcWidth:=0;
+        FAHeaders[i].maxTxtLen:=0;
+        FAHeaders[i].newWidth:=0;
+        FAHeaders[i].ctype:=tcLabel;
+        FAHeaders[i].align:=taLeft;
+        FAHeaders[i].name:='';
+    end;
+    //---
+    SetLength(FASelRows,FRowCount);
+    for i:=0 to Length(FASelRows)-1 do FASelRows[i]:=False;
+    //---
+    FTable.ColCount:=FColCount;
+    FTable.RowCount:=FRowCount;
+
+end;
 //-----------------------------------------------------------------------------+
 constructor TCCommonTable.Create(Grid:PStringGrid; ColCount:Word; RowCount:Word; RowHeight:Word);
 var i:Integer;
@@ -137,8 +184,14 @@ begin
     //---
     FCanSort    := True;
     FCanSearch  := True;
+    FValAutoWith:= True;
     FSortPos    :=0;
     FSortDir    :=0;
+    //---
+    FCanEdit    :=True;
+    FReadOnly   :=True;
+    FEditxPos   :=-1;
+    FEdityPos   :=-1;
     //---
     TableColor  :=$FFFFFF;
     OddColor    :=$EEEEEE;//C0C0C0
@@ -162,6 +215,7 @@ begin
         FAHeaders[i].width:=0;
         FAHeaders[i].calcWidth:=0;
         FAHeaders[i].newWidth:=0;
+        FAHeaders[i].maxTxtLen:=0;
         FAHeaders[i].ctype:=tcLabel;
         FAHeaders[i].align:=taLeft;
         FAHeaders[i].name:='';
@@ -190,27 +244,42 @@ begin
     FTable.OnKeyDown:=FOnKeyDown;
     FTable.OnSelectCell:=FOnSelectCell;
     //---
+    FEdit:=TEdit.Create(FTable.Owner);
+    FEdit.Parent:=FTable.Parent;
+    FEdit.Align :=alNone;
+    FEdit.Color:=SelColor;
+    FEdit.AutoSize:=False;
+    FEdit.Ctl3D:=False;
+    FEdit.BorderStyle:=bsSingle;
+    FEdit.ReadOnly:=FReadOnly;
+    FEdit.Visible:=False;
+    FEdit.OnExit:=FEditOnExit;
 end;
 //-----------------------------------------------------------------------------+
 procedure   TCCommonTable.RowAdd(DelimitedText:string;Delimiter:AnsiChar);
-var i:Integer; row:TStringList;
+var i:Integer; list:TStringList;
 begin
-    if( FTable.RowCount < FLastRow + 2 )then FTable.RowCount:=FLastRow + 2;
+    if( FTable.RowCount <> FLastRow + 2 )then FTable.RowCount:=FLastRow + 2;
     try
         //---
         DelimitedText:=StringReplace(DelimitedText,#13,'',[rfReplaceAll, rfIgnoreCase]);
         DelimitedText:=StringReplace(DelimitedText,#10,'_',[rfReplaceAll, rfIgnoreCase]);
         //---
-        row:=TStringList.Create;
-        row.Delimiter:=Delimiter;
-        row.DelimitedText:=DelimitedText;
-        row.Text:=StringReplace(row.Text,'_',' ',[rfReplaceAll, rfIgnoreCase]);
+        list:=TStringList.Create;
+        list.Delimiter:=Delimiter;
+        list.DelimitedText:=DelimitedText;
+        list.Text:=StringReplace(list.Text,'_',' ',[rfReplaceAll, rfIgnoreCase]);
         //---
-        if( row.Count > FTable.ColCount )then
-            for i:=0 to FTable.ColCount do FTable.Cells[i,FLastRow+1]:=Trim(row[i])
-            else FTable.Rows[FLastRow+1].AddStrings(row);row.count;
+        for i:=0 to Length(FAHeaders)-1 do begin
+            if( i > list.Count -1 )then Continue;
+            if( FAHeaders[i].maxTxtLen < Length(list[i])+2 )then FAHeaders[i].maxTxtLen := Length(list[i])+2;
+        end;
         //---
-        row.Free;
+        if( list.Count > FTable.ColCount )then
+            for i:=0 to FTable.ColCount do FTable.Cells[i,FLastRow+1]:=Trim(list[i])
+            else FTable.Rows[FLastRow+1].AddStrings(list);
+        //---
+        list.Free;
     except end;
     inc(FLastRow);
 end;
@@ -223,6 +292,11 @@ begin
     DelimitedText:=StringReplace(DelimitedText,#13,'',[rfReplaceAll, rfIgnoreCase]);
     DelimitedText:=StringReplace(DelimitedText,#10,'_',[rfReplaceAll, rfIgnoreCase]);
     //---
+    for i:=0 to Length(FAHeaders)-1 do begin
+        if( i > list.Count -1 )then Continue;
+        if( FAHeaders[i].maxTxtLen < Length(list[i])+2 )then FAHeaders[i].maxTxtLen := Length(list[i])+2;
+    end;
+    //---
     try
         list:=TStringList.Create;
         list.Delimiter:=Delimiter;
@@ -230,10 +304,9 @@ begin
         list.Text:=StringReplace(list.Text,'_',' ',[rfReplaceAll, rfIgnoreCase]);
         //---
         if( list.Count > FTable.ColCount )then
-            for i:=0 to FTable.ColCount do FTable.Cells[i,FLastRow+1]:=Trim(list[i])
-            else FTable.Rows[FLastRow+1].AddStrings(list);list.count;
+            for i:=0 to FTable.ColCount do FTable.Cells[i,Row+1]:=Trim(list[i])
+            else FTable.Rows[Row+1].AddStrings(list);
         //---
-        FTable.Rows[Row+1].AddStrings(list);
         list.Free;
     except end;
     FLastRow:=RowsCount;
@@ -256,6 +329,15 @@ begin
     //---
     list.Free;
     Result:=RowsCount;
+end;
+//-----------------------------------------------------------------------------+
+procedure TCCommonTable.Clear;var i:Integer;
+begin
+    for i:=0 to FTable.RowCount-1 do FTable.Rows[i].Clear;
+    //---
+    FTable.RowCount:=2;
+    FTable.Rows[1].Clear;
+    FLastRow:=0;
 end;
 //-----------------------------------------------------------------------------+
 procedure   TCCommonTable.SaveToFile(FileName:string; ShowHeaders:Boolean=False);
@@ -312,6 +394,7 @@ begin
     if( Length(FAHeaders) <= FHdCount )then SetLength(FAHeaders,FHdCount+1);
     //---
     FAHeaders[FHdCount].name:=Name;
+    FAHeaders[FHdCount].maxTxtLen:=Length(name)+2;
     FAHeaders[FHdCount].ctype:=ColType;
     FAHeaders[FHdCount].align:=Align;
     FAHeaders[FHdCount].width:=Width;
@@ -334,61 +417,51 @@ end;
 //-----------------------------------------------------------------------------+
 procedure 	TCCommonTable.AutoWidth;
 var
-i,stWidth,nulCount,maxIndex,nulWidth,maxWidth,addWidth,scrlWidth,tabWidth:Integer;
-bWidth:Integer;
+i,bdWidth,statWidth,dinWith,maxWidth,minWidth,scrlWidth,tabWidth,minIndex,realLen:Integer;
 begin
-    stWidth:=0; // общая ширина всех статических столбцов
-    nulCount:=0;// счетчик динамических (неопределенных по ширине столбцов)
-    maxIndex:=-1;
-    maxWidth:=0;
+    statWidth:=0; // общая ширина всех статических столбцов
+    dinWith:=0; // ширина нестатичных колонок = ширина таблицы - ширина статичных
+    maxWidth:=0; // длинна текста во всех колонках кроме тех где ширина статична
+    minWidth:=0;
     scrlWidth:=0;
-    nulWidth:=0;
-    addWidth:=0;// целочисленный остаток ширины таблицы при делении с округлением. добавляем его в последний стобец потом
+    minIndex:=0;// индекс самой узкой колонки
+    realLen:=0; //сюда будем писать общую реальную ширину после округления
+    //-- подстчитываем общую динну строк всех колонок с динамической шириной
+    for i:=0 to Length(FAHeaders)-1 do if( FAHeaders[i].width = 0 )then  Inc(maxWidth,FAHeaders[i].maxTxtLen);
     //--- находим ширину каждого стобца исходя из общей ширины таблицы отнимая ширину бордюров
-    if( FTable.BorderStyle = bsSingle )then bWidth:=1 else bWidth:=0;
+    if( FTable.BorderStyle = bsSingle )then bdWidth:=1 else bdWidth:=0;
     if(( GetWindowLong( FTable.Handle, GWL_STYLE )and WS_VSCROLL ) <> 0 )then scrlWidth:=18;        // ширина полосы вертикального скроллинга если она есть
-    tabWidth:=FTable.Width-((bWidth*FTable.ColCount)+bWidth) - scrlWidth;
-    stWidth:= Trunc( tabWidth / FTable.ColCount );                                                  // находим среднюю ширину колонки
-    addWidth:=tabWidth - ( stWidth * FTable.ColCount );                                             // вычисляем остаток от округления
+    tabWidth:=FTable.Width-((bdWidth*FTable.ColCount)+bdWidth) - scrlWidth;                           // ширина таблицы без бордюров и полосы скроллинга
+    statWidth:= Trunc( tabWidth / FTable.ColCount );                                                // находим среднюю ширину колонки
     //--- если не определили ни одну колонку (пустая таблица)
     if( Length(FAHeaders) < 1 )then begin
         for i:=0 to FTable.ColCount-1 do begin
-            FTable.ColWidths[i]:=stWidth;
-            if( i = FTable.ColCount-1 )then FTable.ColWidths[i]:=FTable.ColWidths[i] + addWidth;// в проследнюю колонку добавляем остаток, что бы не было дырок
+            FTable.ColWidths[i]:=statWidth;
+            if( i = FTable.ColCount-1 )then FTable.ColWidths[i]:=FTable.ColWidths[i]+(tabWidth-(statWidth*FTable.ColCount));// в проследнюю колонку добавляем остаток, что бы не было дырок
         end;
         Exit;
-    end;
-    //--- перекладываем статическую ширину на место, подсчитываем количество статичних столбцов
-    stWidth:=0;
-    for i:=0 to Length(FAHeaders)-1 do begin
-        if( FAHeaders[i].width > 0 )then begin
-            inc(stWidth,FAHeaders[i].width);
-            FAHeaders[i].calcWidth:=FAHeaders[i].width;// если мы определили статическую ширину при объявлении столбца перекладываем ее в высчитанную
-        end else Inc(nulCount);
-    end;
-    //---
-    if( nulCount > 0 )then begin  // если есть столбцы со статической шириной, распределяем оставшуюся ширину по динамичесим столбцам
-        //---
-        nulWidth:=Trunc( (tabWidth-stWidth) / nulCount );// находим ширину для неопределенных стобцов если они есть
-        //---
-        maxWidth:=0;
+    end else begin  //если мы определяли колонки, то колонок грида столько же сколько определили
+        statWidth:=0; // общая ширина всех колонок со статической шириной
+        //--- перекладываем статическую ширину на место, подсчитываем количество статичних столбцов
         for i:=0 to Length(FAHeaders)-1 do begin
-            if( FAHeaders[i].width = 0 )then FAHeaders[i].calcWidth:=nulWidth;                      // распределяем ширину по колонкам
-            inc(maxWidth,FAHeaders[i].calcWidth);
+            if( FAHeaders[i].width > 0 )then begin
+                inc(statWidth,FAHeaders[i].width);
+                FAHeaders[i].calcWidth:=FAHeaders[i].width;// если мы определили статическую ширину при объявлении столбца перекладываем ее в высчитанную
+            end;// else Inc(nulCount);
         end;
-        Inc(FAHeaders[Length(FAHeaders)-1].calcWidth,tabWidth-maxWidth);                                     // добвляем омстаток в последнюю колонку
         //---
-    end else begin
-        if( stWidth <> 0 )then nulWidth:=(tabWidth-stWidth);
-        if( nulWidth <> 0 )then begin
-            for i:=0 to Length(FAHeaders)-1 do begin
-                if( FAHeaders[i].width > maxWidth )then begin
-                    maxWidth:= FAHeaders[i].width;
-                    maxIndex:=i;
-                end;
+        dinWith:=tabWidth-statWidth;// вычислили ширину димамических колонок
+        minWidth:=dinWith;
+        for i:=0 to Length(FAHeaders)-1 do begin
+            if( FAHeaders[i].width <> 0 )then Continue;                                             // статически определенные колонки пропускаем
+            FAHeaders[i].calcWidth:=Trunc(dinWith/(maxWidth/Max(FAHeaders[i].maxTxtLen,1)));          // распределяем ширину колонок по длинне контента учитывая статическую ширину
+            inc(realLen,FAHeaders[i].calcWidth);                                                    // записываем макс длинну динамических колонок
+            if( minWidth > FAHeaders[i].calcWidth )then begin
+                minWidth := FAHeaders[i].calcWidth;
+                minIndex:=i;                                                                        // находим позицию самой узкой динамической колонки
             end;
-            if( maxIndex >= 0)then FAHeaders[maxIndex].calcWidth:=FAHeaders[maxIndex].width+nulWidth;
         end;
+        inc(FAHeaders[minIndex].calcWidth,Abs(dinWith-realLen));                                    // добавляем остаток в самую узкую колонку
     end;
     //--- начисляем
     for i:=0 to FTable.ColCount-1 do FTable.ColWidths[i]:=FAHeaders[i].calcWidth;
@@ -580,9 +653,35 @@ begin
 end;
 //-----------------------------------------------------------------------------+
 procedure   TCCommonTable.FOnDblClick(Sender: TObject);
+var
+rect:TRect;
+text:ShortString;
 begin
     if( FARow = 0 )then Exit;
+    //---
+    if( FCanEdit )then begin
+        if( not FReadOnly )then FEdit.Color:=TableColor;
+        Rect := Ftable.CellRect(FACol,FARow);
+        //---
+        FEdit.Top:=Ftable.Top + rect.Top;
+        FEdit.Height:=rect.Bottom-rect.Top+2;
+        FEdit.Left:=Ftable.Left+rect.Left;
+        FEdit.Width:=(rect.Right-rect.Left)+2;
+        FEditxPos:=FACol;
+        FEdityPos:=FARow;
+        FEdit.Text:=Ftable.Cells[FACol,FARow];
+        FEdit.Visible:=True;
+        FEdit.SetFocus;
+    end;
+    //---
     if( Assigned(FDblClick) )then FDblClick(FACol,FARow-1,False);
+end;
+//-----------------------------------------------------------------------------+
+procedure TCCommonTable.FEditOnExit(Sender: TObject);
+begin                                                                                               
+    Ftable.Cells[FEditxPos,FEdityPos]:=FEdit.Text;
+    FEdit.Visible:=False;
+    FEdit.Text:='';
 end;
 //-----------------------------------------------------------------------------+
 procedure   TCCommonTable.FOnDrawCell(Sender: TObject; ACol, ARow: Integer; Rect: TRect; State: TGridDrawState);
@@ -624,21 +723,27 @@ begin
         FillRect(Rect);
         SetBkMode(Handle, TRANSPARENT);
         if( ACol < Length( FAHeaders ) )then begin
-            case  FAHeaders[ACol].align of
-                taLeft : begin
-                    if( ARow = 0 )and( ACol = FSortPos )then DrawArrow(FSortDir,Rect);
-                    SetTextAlign(Handle,TA_LEFT);
-                    TextOut(Rect.Left+HM,Rect.Top+VM,Ftable.Cells[ACol,ARow]);
+            try
+                case  FAHeaders[ACol].align of
+                    taLeft : begin
+                        if( ARow = 0 )and( ACol = FSortPos )then DrawArrow(FSortDir,Rect);
+                        SetTextAlign(Handle,TA_LEFT);
+                        TextOut(Rect.Left+HM,Rect.Top+VM,Ftable.Cells[ACol,ARow]);
+                    end;
+                    taRight: begin
+                        if( ARow = 0 )and( ACol = FSortPos )then DrawArrow(FSortDir,Rect,True);
+                        SetTextAlign(Handle,TA_RIGHT);
+                        TextOut(Rect.Right-HM,Rect.Top+VM,Ftable.Cells[ACol,ARow]);
+                    end;
+                    taCenter:begin
+                        if( ARow = 0 )and( ACol = FSortPos )then DrawArrow(FSortDir,Rect);
+                        SetTextAlign(Handle,TA_CENTER);
+                        TextOut(Rect.Left+(Rect.Right - Rect.Left)div 2,Rect.Top+VM,Ftable.Cells[ACol,ARow]);
+                    end;
                 end;
-                taRight: begin
-                    if( ARow = 0 )and( ACol = FSortPos )then DrawArrow(FSortDir,Rect,True);
-                    SetTextAlign(Handle,TA_RIGHT);
-                    TextOut(Rect.Right-HM,Rect.Top+VM,Ftable.Cells[ACol,ARow]);
-                end;
-                taCenter:begin
-                    if( ARow = 0 )and( ACol = FSortPos )then DrawArrow(FSortDir,Rect);
-                    SetTextAlign(Handle,TA_CENTER);
-                    TextOut(Rect.Left+(Rect.Right - Rect.Left)div 2,Rect.Top+VM,Ftable.Cells[ACol,ARow]);
+            except
+                on E : Exception do begin
+                    PrintLn(['SetTextAlign Error : ',E.ClassName,':',E.Message,' ACol:',ACol,' ARow:',ARow,' Text:',Ftable.Cells[ACol,ARow]]);
                 end;
             end;
         end;
@@ -903,4 +1008,5 @@ procedure   TCCommonTable.SetSearch(canSearch:Boolean);begin FCanSearch:=canSear
 //-----------------------------------------------------------------------------+
 function    TCCommonTable.RowsCount:Word;begin Result:=FTable.RowCount-1; end;
 //-----------------------------------------------------------------------------+
+
 end.
